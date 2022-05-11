@@ -1,0 +1,295 @@
+#!/bin/bash
+
+XZ_IMAGE=2022-04-04-raspios-bullseye-armhf-lite.img.xz
+IMAGE=${XZ_IMAGE/.xz/}
+
+RAW_DEVICES=()
+
+declare -A DEVICES
+declare -A DEVICES_SELECTED
+declare -A DEVICES_INFO
+
+INCREMENTAL_HOSTNAME_STATUS=ON
+CURRENT_HOSTNAME_INDEX=1
+HOSTNAME_PREFIX=pi
+
+sudo -v > /dev/null #ask for sudo password
+
+printColor() {
+    local color=0m
+    if [[ $2 == disable ]]; then
+        color=90m
+    fi
+
+    echo -e "\033[$color$1\033[0m"
+}
+
+getDeviceInfo() {
+    sudo fdisk -l | grep "Disk $1:"
+}
+
+getUsbDevices() {
+    RAW_DEVICES=()
+    if [[ -n $(ls -l /dev/disk/by-id/usb* 2>/dev/null) ]]; then
+        for device in `ls -l /dev/disk/by-id/usb* | grep "/[a-z]*$" | awk '{print $11}'`; do
+            local cleanDeviceString=/dev/${device:(-3)}
+            RAW_DEVICES+=($cleanDeviceString)
+        done
+    fi
+}
+
+processUsbDevices() {
+    truncateHashMaps
+    local count=1
+    for device in ${RAW_DEVICES[@]}; do
+        local deviceInfo=$(getDeviceInfo $device)
+        if [[ -n $deviceInfo ]]; then
+            DEVICES[$device]=$count # hashmap: key: menu index
+            DEVICES_SELECTED[$device]=0 # hashmap: key: isSelected
+            DEVICES_INFO[$device]=$deviceInfo
+            count=$((count+1))
+        fi
+    done
+}
+
+truncateHashMaps() {
+    for key in ${!DEVICES[@]}; do
+        DEVICES[$key]=0
+        DEVICES_SELECTED[$key]=0
+        DEVICES_INFO[$key]=none
+    done
+}
+
+toggleIncrementalHostnameStatus() {
+    if [[ $INCREMENTAL_HOSTNAME_STATUS == ON ]]; then
+        INCREMENTAL_HOSTNAME_STATUS=OFF
+    else
+        INCREMENTAL_HOSTNAME_STATUS=ON
+    fi
+}
+
+showAvailableDisksOptions() {
+    if isAvailable; then
+        echo "  Select Device(s)"
+        for deviceKey in ${!DEVICES[@]}; do
+            if (( ${DEVICES[$deviceKey]} != 0)); then
+                echo "      "${DEVICES[$deviceKey]}. ${DEVICES_INFO[$deviceKey]}
+            fi
+        done
+    fi
+}
+
+showGenericMenu() {
+    printColor "  Options" normal
+    printColor "    r. Refresh device list" normal
+    printColor "    w. Write image to selected device(s)" normal
+
+    if isSingleSelected; then
+        printColor "    i. Toggle incremental hostname $INCREMENTAL_HOSTNAME_STATUS" normal
+    else
+        printColor "    i. Toggle incremental hostname $INCREMENTAL_HOSTNAME_STATUS" disable
+
+    fi  
+
+    printColor "    q. Quit" normal
+}
+
+showMenu() {
+    showAvailableDisksOptions
+    echo 
+    showSelectedDisks
+    echo
+    showGenericMenu
+}
+
+showSelectedDisks() {
+     if isSelected; then
+        echo "  Selected Device(s)"
+        for deviceKey in ${!DEVICES_SELECTED[@]}; do
+            if [[ ${DEVICES_SELECTED[$deviceKey]} == 1 ]]; then
+                echo "      "${DEVICES_INFO[$deviceKey]}
+            fi
+        done
+    fi
+}
+
+isSelected() {
+    for deviceKey in ${!DEVICES_SELECTED[@]}; do
+        if [[ ${DEVICES_SELECTED[$deviceKey]} == 1 ]]; then
+            return 0
+        fi
+    done
+
+    return 1
+}
+
+isAvailable() {
+    for deviceKey in ${!DEVICES[@]}; do
+        if [[ ${DEVICES[$deviceKey]} != 0 ]]; then
+            return 0
+        fi
+    done
+
+    return 1
+}
+
+isSingleSelected() {
+    local count=0
+    for deviceKey in ${!DEVICES_SELECTED[@]}; do
+        if [[ ${DEVICES_SELECTED[$deviceKey]} == 1 ]]; then
+            count=$((count+1))
+        fi
+    done
+    
+    if (( $count == 1 )); then
+        return 0
+    fi
+
+    return 1
+}
+
+unpackArchive() {
+    MESSAGE="Unpacking archive $XZ_IMAGE"
+    if [[ ! -e $IMAGE ]]; then
+        xz -dk  $XZ_IMAGE
+    fi
+}
+
+writeImageTodisk() {
+    MESSAGE="Writing image to ${DEVICES_INFO[$1]}"
+    sudo dd if=$IMAGE of=$1 bs=16M status=progress
+}
+
+unmountAllDevicePartitions() {
+    MESSAGE="Unmounting $1"
+   for i in $(lsblk -l | grep ${1:(-3)}[1-9] | awk '{print $1}'); do
+        sudo umount /dev/$i
+    done
+}
+
+createMountPoints() {
+    MESSAGE="CReating mount points"
+    if [[ ! -e boot ]]; then
+        mkdir boot
+    fi
+
+    if [[ ! -e rootfs ]]; then
+        mkdir rootfs
+    fi
+}
+
+mountPartitions() {
+    sudo mount -t vfat "$1"1 boot
+    sudo mount -t ext4 "$1"2  rootfs
+}
+
+enableSSH() {
+    sudo touch boot/ssh
+}
+
+addHostname() {
+    sudo sed -i "s/raspberrypi/$1/" rootfs/etc/hostname
+}
+
+copyPublicKey() {
+    if [[ ! -e rootfs/home/pi/.ssh ]]; then
+        sudo mkdir -m 700 rootfs/home/pi/.ssh
+    fi
+    if [[ -e rootfs/home/pi/.ssh ]]; then
+    echo writing
+        sudo cp ~/.ssh/id_rsa.pub rootfs/home/pi/.ssh/authorized_keys
+        sudo chown -R 1000:1000 rootfs/home/pi/.ssh
+    fi
+
+    sudo sed -i 's/#PasswordAuthentication yes/PasswordAuthentication no/' rootfs/etc/ssh/sshd_config 
+}
+
+unmountEjectDevice() {
+    unmountAllDevicePartitions $1
+    sudo eject $1
+}
+
+cleanup() {
+    if [[ -e boot ]]; then
+        sudo rm -rf boot
+    fi
+
+    if [[ -e rootfs ]]; then
+        sudo rm -rf rootfs
+    fi
+
+    rm $IMAGE
+}
+
+testChoice() {
+    if [[ $CHOICE == 'q' ]]; then
+        return 1
+    fi
+
+    return 0
+}
+
+handleChoice() {
+    if [[ $CHOICE == 'r' ]]; then
+        getUsbDevices &&
+        processUsbDevices
+    fi
+
+    if [[ $CHOICE == 'i' ]]; then
+        if isSingleSelected; then
+            toggleIncrementalHostnameStatus
+        fi
+    fi
+
+    if (( $CHOICE >= 1 && $CHOICE <= ${#DEVICES[@]})); then
+        for deviceKey in ${!DEVICES[@]}; do
+            if (( $CHOICE == ${DEVICES[$deviceKey]} )); then
+                DEVICES_SELECTED[$deviceKey]=1
+            fi
+        done
+    fi
+
+    if [[  $CHOICE == 'w' ]]; then
+        if [[ isSelected ]]; then
+            unpackArchive
+            createMountPoints
+            local count=$CURRENT_HOSTNAME_INDEX
+            for deviceKey in ${!DEVICES_SELECTED[@]}; do
+                if [[ ${DEVICES_SELECTED[$deviceKey]} == 1 ]]; then
+                    unmountAllDevicePartitions $deviceKey &&
+                    writeImageTodisk $deviceKey &&
+                    mountPartitions $deviceKey
+                    enableSSH &&
+                    addHostname $HOSTNAME_PREFIX$count &&
+                    copyPublicKey
+                    unmountEjectDevice $deviceKey
+                    count=$((count+1))
+
+                    if [[ $INCREMENTAL_HOSTNAME_STATUS == ON ]]; then
+                        CURRENT_HOSTNAME_INDEX=$((CURRENT_HOSTNAME_INDEX+1))
+                    fi
+                fi
+            done
+
+            getUsbDevices &&
+            processUsbDevices
+        else
+            echo "Nothing selected"
+        fi
+
+        
+    fi
+}
+
+CHOICE=r
+while testChoice; do
+    tput reset
+    handleChoice
+    showMenu
+
+    read CHOICE
+done
+
+
+
+#cleanup

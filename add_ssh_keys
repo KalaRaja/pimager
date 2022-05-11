@@ -1,0 +1,10 @@
+#!/bin/bash
+
+N_PI=4
+PI_USERNAME=pi
+PI_HOSTNAME_PREFIX=pi
+
+
+for ((i = 1; i <= $N_PI; i++)); do
+    ssh-copy-id $PI_USERNAME@$PI_HOSTNAME_PREFIX$i
+done
