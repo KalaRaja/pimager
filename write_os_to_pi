@@ -241,7 +241,7 @@ handleChoice() {
         fi
     fi
 
-    if (( $CHOICE >= 1 && $CHOICE <= ${#DEVICES[@]})); then
+    if (( $CHOICE >= 1 && $CHOICE <= ${#DEVICES[@]} )); then
         for deviceKey in ${!DEVICES[@]}; do
             if (( $CHOICE == ${DEVICES[$deviceKey]} )); then
                 DEVICES_SELECTED[$deviceKey]=1
