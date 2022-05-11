@@ -116,12 +116,24 @@ showSelectedDisks() {
 }
 
 showMenu() {
-    MENU_ROWS=0
     showAvailableDisksOptions
     printr "" normal menu 
     showSelectedDisks
     printr "" normal menu 
     showGenericMenu
+}
+
+clearMenu() {
+    for (( i=0 ; i<$MENU_ROWS ; i++ )); do
+        tput cup i 0 && tput ed
+    done
+    MENU_ROWS=0
+}
+
+showLogs() {
+    tput cup $((MENU_ROWS+2)) 0
+    echo $MESSAGE
+    printr "    $MESSAGE" normal logs
 }
 
 isSelected() {
@@ -168,7 +180,7 @@ unpackArchive() {
 
 writeImageTodisk() {
     MESSAGE="Writing image to ${DEVICES_INFO[$1]}"
-    sudo dd if=$IMAGE of=$1 bs=16M status=progress
+    sudo dd if=$IMAGE of=$1 bs=16M > /dev/null
 }
 
 unmountAllDevicePartitions() {
@@ -221,50 +233,40 @@ unmountEjectDevice() {
 }
 
 cleanup() {
-    if [[ -e boot ]]; then
-        sudo rm -rf boot
-    fi
-
-    if [[ -e rootfs ]]; then
-        sudo rm -rf rootfs
-    fi
-
-    rm $IMAGE
-}
-
-testChoice() {
-    if [[ $CHOICE == 'q' ]]; then
-        return 1
-    fi
-
-    return 0
+    sudo rm -rf boot > /dev/null 2>&1
+    sudo rm -rf rootfs > /dev/null 2>&1
+    rm $IMAGE > /dev/null 2>&1
 }
 
 handleChoice() {
-    if [[ $CHOICE == 'r' ]]; then
+    if [[ -z $CHOICE ]]; then
+        return 0
+    elif [[ $CHOICE == 'r' ]]; then
         getUsbDevices &&
-        processUsbDevices
-    fi
-
-    if [[ $CHOICE == 'i' ]]; then
+        processUsbDevices &&
+        showScreen
+        unset CHOICE
+    elif [[ $CHOICE == 'i' ]]; then
         if isSingleSelected; then
-            toggleIncrementalHostnameStatus
+            toggleIncrementalHostnameStatus &&
+            clearMenu &&
+            showMenu
+            unset CHOICE
         fi
-    fi
-
-    if [[ $CHOICE == 'c' ]]; then
+    elif [[ $CHOICE == 'c' ]]; then
         cleanup
-    fi
-
-    if (( $CHOICE >= 1 && $CHOICE <= ${#DEVICES[@]} )); then
+        unset CHOICE
+    elif (( $CHOICE >= 1 && $CHOICE <= ${#DEVICES[@]} )); then
         for deviceKey in ${!DEVICES[@]}; do
             if (( $CHOICE == ${DEVICES[$deviceKey]} )); then
-                DEVICES_SELECTED[$deviceKey]=1
+                if (( ${DEVICES_SELECTED[$deviceKey]} == 0 )); then
+                    DEVICES_SELECTED[$deviceKey]=1
+                    showScreen
+                fi
             fi
         done
-    fi
-
-    if [[  $CHOICE == 'w' ]]; then
+        unset CHOICE
+    elif [[  $CHOICE == 'w' ]]; then
         if [[ isSelected ]]; then
             unpackArchive
             createMountPoints
@@ -287,24 +289,41 @@ handleChoice() {
             done
 
             getUsbDevices &&
-            processUsbDevices
+            processUsbDevices &&
+            showScreen
         else
             echo "Nothing selected"
         fi
 
-        
+        unset CHOICE
     fi
 }
 
 tput reset
 
-CHOICE=r
-while testChoice; do
-    handleChoice
+showScreen () {
+    clearMenu &&
     showMenu
-    echo rows$MENU_ROWS
+    showLogs
+}
 
-    read CHOICE
+getUsbDevices &&
+processUsbDevices &&
+showScreen
+
+
+readInput() {
+    local input="r"
+    read -n 1 -s -t .1 input
+    if [[ ! -z $input ]]; then
+        CHOICE=$input
+    fi
+}
+
+while [[ $CHOICE != "q" ]]; do
+    readInput
+    handleChoice
+    showLogs
 done
 
 
