@@ -12,10 +12,19 @@ declare -A DEVICES_INFO
 INCREMENTAL_HOSTNAME_STATUS=ON
 CURRENT_HOSTNAME_INDEX=1
 HOSTNAME_PREFIX=pi
+MENU_ROWS=0
 
 sudo -v > /dev/null #ask for sudo password
 
-printColor() {
+printr() {
+    # $1 message
+    # $2 color
+    # $3 type
+
+    if [[ $3 == "menu" ]]; then
+        MENU_ROWS=$((MENU_ROWS+1))
+    fi
+
     local color=0m
     if [[ $2 == disable ]]; then
         color=90m
@@ -70,47 +79,49 @@ toggleIncrementalHostnameStatus() {
 
 showAvailableDisksOptions() {
     if isAvailable; then
-        echo "  Select Device(s)"
+        printr "  Select Device(s)" normal menu
         for deviceKey in ${!DEVICES[@]}; do
             if (( ${DEVICES[$deviceKey]} != 0)); then
-                echo "      "${DEVICES[$deviceKey]}. ${DEVICES_INFO[$deviceKey]}
+                printr "    ${DEVICES[$deviceKey]}. ${DEVICES_INFO[$deviceKey]}" normal menu
             fi
         done
     fi
 }
 
 showGenericMenu() {
-    printColor "  Options" normal
-    printColor "    r. Refresh device list" normal
-    printColor "    w. Write image to selected device(s)" normal
+    printr "  Options" normal menu
+    printr "    r. Refresh device list" normal menu
+    printr "    w. Write image to selected device(s)" normal menu
 
     if isSingleSelected; then
-        printColor "    i. Toggle incremental hostname $INCREMENTAL_HOSTNAME_STATUS" normal
+        printr "    i. Toggle incremental hostname $INCREMENTAL_HOSTNAME_STATUS" normal menu
     else
-        printColor "    i. Toggle incremental hostname $INCREMENTAL_HOSTNAME_STATUS" disable
+        printr "    i. Toggle incremental hostname $INCREMENTAL_HOSTNAME_STATUS" disable menu
 
     fi  
 
-    printColor "    q. Quit" normal
-}
-
-showMenu() {
-    showAvailableDisksOptions
-    echo 
-    showSelectedDisks
-    echo
-    showGenericMenu
+    printr "    c. Cleanup" normal menu
+    printr "    q. Quit" normal menu
 }
 
 showSelectedDisks() {
      if isSelected; then
-        echo "  Selected Device(s)"
+        printr "  Selected Device(s)" normal menu
         for deviceKey in ${!DEVICES_SELECTED[@]}; do
             if [[ ${DEVICES_SELECTED[$deviceKey]} == 1 ]]; then
-                echo "      "${DEVICES_INFO[$deviceKey]}
+                printr "      ${DEVICES_INFO[$deviceKey]}" normal menu
             fi
         done
     fi
+}
+
+showMenu() {
+    MENU_ROWS=0
+    showAvailableDisksOptions
+    printr "" normal menu 
+    showSelectedDisks
+    printr "" normal menu 
+    showGenericMenu
 }
 
 isSelected() {
@@ -163,7 +174,7 @@ writeImageTodisk() {
 unmountAllDevicePartitions() {
     MESSAGE="Unmounting $1"
    for i in $(lsblk -l | grep ${1:(-3)}[1-9] | awk '{print $1}'); do
-        sudo umount /dev/$i
+        sudo umount /dev/$i > /dev/null 2>&1
     done
 }
 
@@ -206,7 +217,7 @@ copyPublicKey() {
 
 unmountEjectDevice() {
     unmountAllDevicePartitions $1
-    sudo eject $1
+    sudo eject $1 > /dev/null 2>&1
 }
 
 cleanup() {
@@ -239,6 +250,10 @@ handleChoice() {
         if isSingleSelected; then
             toggleIncrementalHostnameStatus
         fi
+    fi
+
+    if [[ $CHOICE == 'c' ]]; then
+        cleanup
     fi
 
     if (( $CHOICE >= 1 && $CHOICE <= ${#DEVICES[@]} )); then
@@ -281,11 +296,13 @@ handleChoice() {
     fi
 }
 
+tput reset
+
 CHOICE=r
 while testChoice; do
-    tput reset
     handleChoice
     showMenu
+    echo rows$MENU_ROWS
 
     read CHOICE
 done
