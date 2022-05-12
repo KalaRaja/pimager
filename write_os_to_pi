@@ -251,6 +251,18 @@ mountPartitions() {
     fi
 }
 
+generateSSHKeygen() {
+    LOGS+=("i Checking local SSH keys");
+    if [[ ! -e $HOME/.ssh/id_rsa.pub ]];then
+        LOGS+=("i Generating local SSH keys");
+        local error=$(ssh-keygen -b 4096 -t rsa -q -N "" 2>&1)
+
+        if ((  $? )); then
+        LOGS+=("e Could not generate SSH private and public keys: $error")
+        fi
+    fi
+}
+
 enableSSH() {
     LOGS+=("i Enabling SSH");
     local error=$(sudo touch boot/ssh 2>&1)
@@ -316,16 +328,30 @@ unmountEjectDevice() {
 cleanup() {
     LOGS+=("i Cleaning up")
 
-    local error=$(rm -rf boot 2>&1)
+    LOGS+=("i Unmounting boot")
+    local error=$(sudo umount boot 2>&1)
 
     if ((  $? )); then
-        LOGS+=("e Could not remove boot: $error")
+        LOGS+=("e Could unmount boot: $error")
+    else
+        error=$(rm -rf boot 2>&1)
+
+        if ((  $? )); then
+            LOGS+=("e Could not remove boot: $error")
+        fi
     fi
 
-    error=$(rm -rf rootfs 2>&1)
+    LOGS+=("i Unmounting rootfs")
+    error=$(sudo umount rootfs 2>&1)
 
-     if ((  $? )); then
-        LOGS+=("e Could not remove rootfs: $error")
+    if ((  $? )); then
+        LOGS+=("e Could unmount boot: $error")
+    else
+        error=$(rm -rf rootfs 2>&1)
+
+        if ((  $? )); then
+            LOGS+=("e Could not remove rootfs: $error")
+        fi
     fi
 
     error=$(rm $IMAGE 2>&1)
@@ -354,6 +380,7 @@ handleChoice() {
         LOG_FLAG=1
         LOG=()
         cleanup
+        writeLogTofile
         unset CHOICE
     elif (( $CHOICE >= 1 && $CHOICE <= ${#DEVICES[@]} )); then
         for deviceKey in ${!DEVICES[@]}; do
@@ -369,6 +396,7 @@ handleChoice() {
         if [[ isSelected ]]; then
             LOG_FLAG=1
             LOG=()
+            generateSSHKeygen
             unpackArchive
             createMountPoints
             local count=$CURRENT_HOSTNAME_INDEX
@@ -390,6 +418,7 @@ handleChoice() {
                 fi
             done
 
+            writeLogTofile
             getUsbDevices &&
             processUsbDevices &&
             showScreen
@@ -417,6 +446,17 @@ readInput() {
     fi
 }
 
+writeLogTofile() {
+    for log in "${LOGS[@]}"; do
+        local prefix="[INFO]"
+        if [[ ${log:0:1} == "e" ]]; then
+            prefix="[ERROR]"
+        fi
+
+        echo "$(date) $prefix ${log:2}" >> log.txt
+    done
+}
+
 showLogs() {
     if (( $LOG_FLAG == 1 )); then
         tput cup $((MENU_ROWS+1))
@@ -441,7 +481,7 @@ showLogs() {
 getSudo &&
 getUsbDevices &&
 processUsbDevices &&
-showScreen
+showScreen || exit
 
 while [[ $CHOICE != "q" ]]; do
     readInput
