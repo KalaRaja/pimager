@@ -14,13 +14,10 @@ HOSTNAME_PREFIX=pi
 MENU_ROWS=0
 LOG_ROWS=0
 LOGS=()
+LOG_FLAG=0
 
 getSudo() {
-    local error=$(sudo -v 2>&1) #ask for sudo password
-
-    if ((  $? )); then
-        LOGS+=("error 'root' password failed: $error")
-    fi
+    sudo -v #ask for sudo password
 }
 
 printr() {
@@ -41,6 +38,8 @@ printr() {
         color="1;34m"
     elif [[ $2 == "info" ]]; then
         color="1;32m"
+    elif [[ $2 == "error" ]]; then
+        color="1;31m"
     fi
 
     echo -e "\033[$color$1\033[0m"
@@ -184,47 +183,47 @@ isSingleSelected() {
 unpackArchive() {
     if [[ ! -e $IMAGE ]]; then
         if [[ -e $XZ_IMAGE ]]; then
-            LOGS+=("info Unpacking $IMAGE")
+            LOGS+=("i Unpacking $IMAGE")
             local error=$(xz -dk  $XZ_IMAGE 2>&1)
 
             if ((  $? )); then
-                LOGS+=("error Could not unpack $IMAGE: $error")
+                LOGS+=("e Could not unpack $IMAGE: $error")
             fi
 
         else
-            LOGS+=("error No OS image found.")
+            LOGS+=("e No OS image found.")
         fi
     fi
 }
 
 writeImageTodisk() {
-    LOGS+=("info Writing $IMAGE to $1")
-    local error=0 #$(sudo dd if=$IMAGE of=$1 bs=16M 2>&1)
+    LOGS+=("i Writing $IMAGE to $1")
+    local error=$(sudo dd if=$IMAGE of=$1 bs=16M 2>&1)
 
     if ((  $? )); then
-        LOGS+=("error Could not write $IMAGE to $1: $error")
+        LOGS+=("e Could not write $IMAGE to $1: $error")
     fi
 
 }
 
 unmountAllDevicePartitions() {
    for i in $(lsblk -l | grep ${1:(-3)}[1-9] | awk '{print $1}'); do
-        LOGS+=("info Unmounting /dev/$i");
+        LOGS+=("i Unmounting /dev/$i");
         local error=$(sudo umount /dev/$i 2>&1)
 
         if ((  $? )); then
-            LOGS+=("error Could not unmount /dev/$i: $error")
+            LOGS+=("e Could not unmount /dev/$i: $error")
         fi
     done
 }
 
 createMountPoints() {
-    LOGS+=("info Creating mount points");
+    LOGS+=("i Creating mount points");
     if [[ ! -e boot ]]; then
         local error=$(mkdir boot 2>&1)
 
         if ((  $? )); then
-            LOGS+=("error Could not create mount point boot: $error")
+            LOGS+=("e Could not create mount point boot: $error")
         fi
     fi
 
@@ -232,51 +231,51 @@ createMountPoints() {
         local error=$(mkdir rootfs 2>&1)
 
         if ((  $? )); then
-            LOGS+=("error Could not create mount point rootfs: $error")
+            LOGS+=("e Could not create mount point rootfs: $error")
         fi
     fi
 }
 
 mountPartitions() {
-    LOGS+=("info Mouting $1");
+    LOGS+=("i Mouting $1");
     local error=$(sudo mount -t vfat "$1"1 boot 2>&1)
 
     if ((  $? )); then
-        LOGS+=("error Could not mount $1 on boot: $error")
+        LOGS+=("e Could not mount $1 on boot: $error")
     fi
     
-    error=$(sudo mount -t ext4 "$1"2  rootfs)
+    error=$(sudo mount -t ext4 "$1"2  rootfs 2>&1)
 
     if ((  $? )); then
-        LOGS+=("error Could not mount $1 on rootfs: $error")
+        LOGS+=("e Could not mount $1 on rootfs: $error")
     fi
 }
 
 enableSSH() {
-    LOGS+=("info Enabling SSH");
+    LOGS+=("i Enabling SSH");
     local error=$(sudo touch boot/ssh 2>&1)
 
     if ((  $? )); then
-        LOGS+=("error Could not enable SSH: $error")
+        LOGS+=("e Could not enable SSH: $error")
     fi
 }
 
 addHostname() {
-    LOGS+=("info Adding hostname $1");
+    LOGS+=("i Adding hostname $1");
     local error=$(sudo sed -i "s/raspberrypi/$1/" rootfs/etc/hostname 2>&1)
     if ((  $? )); then
-        LOGS+=("error Could not enable SSH: $error")
+        LOGS+=("e Could not enable SSH: $error")
     fi
 }
 
 copyPublicKey() {
-    LOGS+=("info writing your public key");
+    LOGS+=("i writing your public key");
 
     if [[ ! -e rootfs/home/pi/.ssh ]]; then
         local error=$(sudo mkdir -m 700 rootfs/home/pi/.ssh 2>&1)
 
         if ((  $? )); then
-            LOGS+=("error Could not create .ssh directory: $error")
+            LOGS+=("e Could not create .ssh directory: $error")
         fi
     fi
 
@@ -284,60 +283,61 @@ copyPublicKey() {
         local error=$(sudo cp ~/.ssh/id_rsa.pub rootfs/home/pi/.ssh/authorized_keys 2>&1)
 
         if ((  $? )); then
-            LOGS+=("error Could not copy public key: $error")
+            LOGS+=("e Could not copy public key: $error")
         fi
 
-        error=$(sudo chown -R 1000:1000 rootfs/home/pi/.ssh)
+        error=$(sudo chown -R 1000:1000 rootfs/home/pi/.ssh 2>&1)
 
         if ((  $? )); then
-            LOGS+=("error Could not set correct owner of rootfs/home/pi/.ssh: $error")
+            LOGS+=("e Could not set correct owner of rootfs/home/pi/.ssh: $error")
         fi
     fi
 
     local error=$(sudo sed -i 's/#PasswordAuthentication yes/PasswordAuthentication no/' rootfs/etc/ssh/sshd_config 2>&1)
 
     if ((  $? )); then
-            LOGS+=("error Could not set PasswordAuthentication field in rootfs/etc/ssh/sshd_config: $error")
+            LOGS+=("e Could not set PasswordAuthentication field in rootfs/etc/ssh/sshd_config: $error")
     fi
 }
 
 unmountEjectDevice() {
-    LOGS+=("info Unmounting and ejecting device $1")
+    LOGS+=("i Unmounting and ejecting device $1")
     unmountAllDevicePartitions $1
 
+    LOGS+=("i Ejecting device $1")
     local error=$(sudo eject $1 2>&1)
 
     if ((  $? )); then
-            LOGS+=("error Could not eject $1: $error")
+            LOGS+=("e Could not eject $1: $error")
     fi
 
 }
 
 cleanup() {
-    LOGS+=("info Cleaning up")
+    LOGS+=("i Cleaning up")
 
     local error=$(rm -rf boot 2>&1)
 
     if ((  $? )); then
-        LOGS+=("error Could not remove boot: $error")
+        LOGS+=("e Could not remove boot: $error")
     fi
 
-    error=$(rm -rf )
+    error=$(rm -rf rootfs 2>&1)
 
      if ((  $? )); then
-        LOGS+=("error Could not remove rootfs: $error")
+        LOGS+=("e Could not remove rootfs: $error")
     fi
 
-    error=$(rm $IMAGE)
+    error=$(rm $IMAGE 2>&1)
 
      if ((  $? )); then
-        LOGS+=("error Could not remove boot: $IMAGE")
+        LOGS+=("e Could not remove boot: $IMAGE")
     fi
 }
 
 handleChoice() {
     if [[ -z $CHOICE ]]; then
-        return 0
+        LOG_FLAG=0
     elif [[ $CHOICE == 'r' ]]; then
         getUsbDevices &&
         processUsbDevices &&
@@ -351,6 +351,8 @@ handleChoice() {
             unset CHOICE
         fi
     elif [[ $CHOICE == 'c' ]]; then
+        LOG_FLAG=1
+        LOG=()
         cleanup
         unset CHOICE
     elif (( $CHOICE >= 1 && $CHOICE <= ${#DEVICES[@]} )); then
@@ -365,11 +367,14 @@ handleChoice() {
         unset CHOICE
     elif [[  $CHOICE == 'w' ]]; then
         if [[ isSelected ]]; then
+            LOG_FLAG=1
+            LOG=()
             unpackArchive
             createMountPoints
             local count=$CURRENT_HOSTNAME_INDEX
             for deviceKey in ${!DEVICES_SELECTED[@]}; do
                 if [[ ${DEVICES_SELECTED[$deviceKey]} == 1 ]]; then
+                    LOGS+=("i Starting flashing process for $deviceKey")
                     unmountAllDevicePartitions $deviceKey &&
                     writeImageTodisk $deviceKey &&
                     mountPartitions $deviceKey
@@ -388,11 +393,11 @@ handleChoice() {
             getUsbDevices &&
             processUsbDevices &&
             showScreen
-        else
-            echo "Nothing selected"
         fi
 
         unset CHOICE
+    else
+        LOG_FLAG=0
     fi
 }
 
@@ -413,17 +418,24 @@ readInput() {
 }
 
 showLogs() {
-    tput cup $((MENU_ROWS+1))
+    if (( $LOG_FLAG == 1 )); then
+        tput cup $((MENU_ROWS+1))
 
-    for (( i=0 ; i<$LOG_ROWS ; i++)); do
-        tput ed
-    done
+        for (( i=0 ; i<$LOG_ROWS ; i++)); do
+            tput ed
+        done
 
-    LOG_ROWS=0
+        LOG_ROWS=0
 
-    for log in "${LOGS[@]}"; do
-        printr "$log" info log
-    done
+        for log in "${LOGS[@]}"; do
+            local color="info"
+            if [[ ${log:0:1} == "e" ]]; then
+                color="error"
+            fi
+
+            printr "  ${log:2}" "$color" log
+        done
+    fi
 }
 
 getSudo &&
