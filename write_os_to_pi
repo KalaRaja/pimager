@@ -95,7 +95,7 @@ showAvailableDisksOptions() {
     if isAvailable; then
         printr "  Select Device(s)" normal menu
         for deviceKey in ${!DEVICES[@]}; do
-            if (( ${DEVICES[$deviceKey]} != 0)); then
+            if [[ ${DEVICES[$deviceKey]} != 0 ]]; then
                 printr "    ${DEVICES[$deviceKey]}. ${DEVICES_INFO[$deviceKey]}" normal menu
             fi
         done
@@ -175,7 +175,7 @@ isSingleSelected() {
         fi
     done
     
-    if (( $count == 1 )); then
+    if [[ $count == 1 ]]; then
         return 0
     fi
 
@@ -185,11 +185,11 @@ isSingleSelected() {
 unpackArchive() {
     if [[ ! -e $IMAGE ]]; then
         if [[ -e $XZ_IMAGE ]]; then
-            LOGS+=("i Unpacking $IMAGE")
+            LOGS+=("i Unpacking $XZ_IMAGE")
             local error=$(xz -dk  $XZ_IMAGE 2>&1)
 
-            if ((  $? )); then
-                LOGS+=("e Could not unpack $IMAGE: $error")
+            if [[ $? != 0 ]]; then
+                LOGS+=("e Could not unpack $XZ_IMAGE: $error")
             fi
 
         else
@@ -202,7 +202,7 @@ writeImageTodisk() {
     LOGS+=("i Writing $IMAGE to $1")
     local error=$(sudo dd if=$IMAGE of=$1 bs=16M 2>&1)
 
-    if ((  $? )); then
+    if [[ $? != 0 ]]; then
         LOGS+=("e Could not write $IMAGE to $1: $error")
     fi
 
@@ -213,7 +213,7 @@ unmountAllDevicePartitions() {
         LOGS+=("i Unmounting /dev/$i");
         local error=$(sudo umount /dev/$i 2>&1)
 
-        if ((  $? )); then
+        if [[ $? != 0 ]]; then
             LOGS+=("e Could not unmount /dev/$i: $error")
         fi
     done
@@ -224,7 +224,7 @@ createMountPoints() {
     if [[ ! -e boot ]]; then
         local error=$(mkdir boot 2>&1)
 
-        if ((  $? )); then
+        if [[ $? != 0 ]]; then
             LOGS+=("e Could not create mount point boot: $error")
         fi
     fi
@@ -232,7 +232,7 @@ createMountPoints() {
     if [[ ! -e rootfs ]]; then
         local error=$(mkdir rootfs 2>&1)
 
-        if ((  $? )); then
+        if [[ $? != 0 ]]; then
             LOGS+=("e Could not create mount point rootfs: $error")
         fi
     fi
@@ -242,13 +242,13 @@ mountPartitions() {
     LOGS+=("i Mouting $1");
     local error=$(sudo mount -t vfat "$1"1 boot 2>&1)
 
-    if ((  $? )); then
+    if [[ $? != 0 ]]; then
         LOGS+=("e Could not mount $1 on boot: $error")
     fi
     
     error=$(sudo mount -t ext4 "$1"2  rootfs 2>&1)
 
-    if ((  $? )); then
+    if [[ $? != 0 ]]; then
         LOGS+=("e Could not mount $1 on rootfs: $error")
     fi
 }
@@ -259,7 +259,7 @@ generateSSHKeygen() {
         LOGS+=("i Generating local SSH keys");
         local error=$(ssh-keygen -b 4096 -t rsa -q -N "" 2>&1)
 
-        if ((  $? )); then
+        if [[ $? != 0 ]]; then
         LOGS+=("e Could not generate SSH private and public keys: $error")
         fi
     fi
@@ -269,7 +269,7 @@ enableSSH() {
     LOGS+=("i Enabling SSH");
     local error=$(sudo touch boot/ssh 2>&1)
 
-    if ((  $? )); then
+    if [[ $? != 0 ]]; then
         LOGS+=("e Could not enable SSH: $error")
     fi
 }
@@ -277,7 +277,7 @@ enableSSH() {
 addHostname() {
     LOGS+=("i Adding hostname $1");
     local error=$(sudo sed -i "s/raspberrypi/$1/" rootfs/etc/hostname 2>&1)
-    if ((  $? )); then
+    if [[ $? != 0 ]]; then
         LOGS+=("e Could not enable SSH: $error")
     fi
 }
@@ -288,7 +288,7 @@ copyPublicKey() {
     if [[ ! -e rootfs/home/pi/.ssh ]]; then
         local error=$(sudo mkdir -m 700 rootfs/home/pi/.ssh 2>&1)
 
-        if ((  $? )); then
+        if [[ $? != 0 ]]; then
             LOGS+=("e Could not create .ssh directory: $error")
         fi
     fi
@@ -296,20 +296,20 @@ copyPublicKey() {
     if [[ -e rootfs/home/pi/.ssh ]]; then
         local error=$(sudo cp ~/.ssh/id_rsa.pub rootfs/home/pi/.ssh/authorized_keys 2>&1)
 
-        if ((  $? )); then
+        if [[ $? != 0 ]]; then
             LOGS+=("e Could not copy public key: $error")
         fi
 
         error=$(sudo chown -R 1000:1000 rootfs/home/pi/.ssh 2>&1)
 
-        if ((  $? )); then
+        if [[ $? != 0 ]]; then
             LOGS+=("e Could not set correct owner of rootfs/home/pi/.ssh: $error")
         fi
     fi
 
     local error=$(sudo sed -i 's/#PasswordAuthentication yes/PasswordAuthentication no/' rootfs/etc/ssh/sshd_config 2>&1)
 
-    if ((  $? )); then
+    if [[ $? != 0 ]]; then
             LOGS+=("e Could not set PasswordAuthentication field in rootfs/etc/ssh/sshd_config: $error")
     fi
 }
@@ -321,7 +321,7 @@ unmountEjectDevice() {
     LOGS+=("i Ejecting device $1")
     local error=$(sudo eject $1 2>&1)
 
-    if ((  $? )); then
+    if [[ $? != 0 ]]; then
             LOGS+=("e Could not eject $1: $error")
     fi
 
@@ -329,66 +329,68 @@ unmountEjectDevice() {
 
 cleanup() {
     LOGS+=("i Cleaning up")
+    local notMounted=0
+    local error=0
 
-    LOGS+=("i Unmounting boot")
-    local error=$(sudo umount boot 2>&1)
+    if [[ -e boot ]]; then
+        LOGS+=("i Unmounting boot")
+        error=$(sudo umount boot 2>&1)
+        if [[ $? != 0 ]]; then
+            notMounted=0
+            [[ ${error:(-8)} == "mounted." ]] && notMounted=1
+            if [[ $notMounted ]]; then
+                LOGS+=("w Could not unmount boot: $error")
+                LOGS+=("i Removing boot")
 
-    
+                error=$(rm -rf boot 2>&1)
 
-    if ((  $? )); then
-        notMounted=0
-        [[ ${error:(-7)} == "mounted" ]] && notMounted=1
-        if (( $notMounted )); then
-            LOGS+=("w Could not unmount boot: $error")
-            LOGS+=("i Removing boot")
-
-            error=$(rm -rf boot 2>&1)
-
-            if ((  $? )); then
-                LOGS+=("e Could not remove boot: $error")
+                if [[ $? != 0 ]]; then
+                    LOGS+=("e Could not remove boot: $error")
+                fi
+            else
+                LOGS+=("e Could not unmount boot: $error")
             fi
         else
-            LOGS+=("e Could not unmount boot: $error")
-        fi
-    else
-        LOGS+=("i Removing boot")
-        error=$(rm -rf boot 2>&1)
+            LOGS+=("i Removing boot")
+            error=$(rm -rf boot 2>&1)
 
-        if ((  $? )); then
-            LOGS+=("e Could not remove boot: $error")
+            if [[ $? != 0 ]]; then
+                LOGS+=("e Could not remove boot: $error")
+            fi
         fi
     fi
 
-    LOGS+=("i Unmounting rootfs")
-    error=$(sudo umount rootfs 2>&1)
+    if [[ -e rootfs ]]; then
+        LOGS+=("i Unmounting rootfs")
+        error=$(sudo umount rootfs 2>&1)
+        if [[ $? != 0 ]]; then
+            notMounted=0
+            [[ ${error:(-8)} == "mounted." ]] && notMounted=1
+            if [[ $notMounted ]]; then
 
-    if ((  $? )); then
-        notMounted=0
-        [[ ${error:(-7)} == "mounted" ]] && notMounted=1
-        if (( $notMounted )); then
-            LOGS+=("w Could not unmount rootfs: $error")
-            
+                LOGS+=("w Could not unmount rootfs: $error")
+                LOGS+=("i Removing rootfs")
+                error=$(rm -rf rootfs 2>&1)
+
+                if [[ $? != 0 ]]; then
+                    LOGS+=("e Could not remove rootfs: $error")
+                fi
+            fi
+        else
             LOGS+=("i Removing rootfs")
             error=$(rm -rf rootfs 2>&1)
 
-            if ((  $? )); then
+            if [[ $? != 0 ]]; then
                 LOGS+=("e Could not remove rootfs: $error")
             fi
         fi
-    else
-        LOGS+=("i Removing rootfs")
-        error=$(rm -rf rootfs 2>&1)
 
-        if ((  $? )); then
-            LOGS+=("e Could not remove rootfs: $error")
+        LOGS+=("i Removing $IMAGE")
+        error=$(rm $IMAGE 2>&1)
+
+        if [[ $? != 0 ]]; then
+            LOGS+=("e Could not remove $IMAGE: $error")
         fi
-    fi
-
-    LOGS+=("i Removing $IMAGE")
-    error=$(rm $IMAGE 2>&1)
-
-     if ((  $? )); then
-        LOGS+=("e Could not remove $IMAGE: $error")
     fi
 }
 
@@ -415,8 +417,8 @@ handleChoice() {
         unset CHOICE
     elif (( $CHOICE >= 1 && $CHOICE <= ${#DEVICES[@]} )); then
         for deviceKey in ${!DEVICES[@]}; do
-            if (( $CHOICE == ${DEVICES[$deviceKey]} )); then
-                if (( ${DEVICES_SELECTED[$deviceKey]} == 0 )); then
+            if [[ $CHOICE == ${DEVICES[$deviceKey]} ]]; then
+                if [[ ${DEVICES_SELECTED[$deviceKey]} == 0 ]]; then
                     DEVICES_SELECTED[$deviceKey]=1
                     showScreen
                 fi
@@ -483,8 +485,6 @@ writeLogTofile() {
         if [[ ${log:0:1} == "e" ]]; then
             prefix="[ERROR]"
         elif [[ ${log:0:1} == "w" ]]; then
-            prefix="[ERROR]"
-        elif [[ ${log:0:1} == "w" ]]; then
             prefix="[WARNING]"
         fi
 
@@ -493,11 +493,11 @@ writeLogTofile() {
 }
 
 showLogs() {
-    if (( $LOG_FLAG == 1 )); then
+    if [[ $LOG_FLAG == 1 ]]; then
         tput cup $((MENU_ROWS+1))
 
-        for (( i=0 ; i<$LOG_ROWS ; i++)); do
-            tput ed
+        for (( i=0 ; i<$LOG_ROWS ; i++ )); do
+           tput ed
         done
 
         LOG_ROWS=0
